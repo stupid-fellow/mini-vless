@@ -11,15 +11,16 @@ PLAIN='\033[0m'
 RV_SCRIPT="/root/rv.sh"
 
 # ==================================================
-# 2. 核心功能：写入 rv.sh (实际干活的脚本)
+# 2. 核心功能：写入 rv.sh (这是实际执行安装的脚本)
 # ==================================================
 write_rv_script() {
+# 注意：下面的 'EOF' 必须保持原样，不要改动
 cat > "$RV_SCRIPT" <<'EOF'
 #!/usr/bin/env bash
 export LANG=en_US.UTF-8
 
 # =========================
-# VLESS Reality Vision (全系统兼容版)
+# VLESS Reality Vision (内核脚本)
 # =========================
 
 ENV_FILE="/root/reality_vision.env"
@@ -27,21 +28,20 @@ XRAY_BIN="/usr/local/bin/xray"
 XRAY_CONF="/usr/local/etc/xray/config.json"
 REYM_DEFAULT="www.tesla.com"
 
-# -------------------------
-# 系统检测
-# -------------------------
+# --- 系统检测 ---
 check_sys() {
     if [ -f /etc/alpine-release ]; then
         RELEASE="alpine"
     elif command -v apt-get >/dev/null 2>&1; then
-        RELEASE="debian" # Ubuntu/Debian/Kali
+        RELEASE="debian" 
     elif command -v yum >/dev/null 2>&1; then
-        RELEASE="centos" # CentOS/RedHat
+        RELEASE="centos"
     else
         RELEASE="unknown"
     fi
 }
 
+# --- 安装依赖 ---
 install_deps() {
     check_sys
     echo "正在为 $RELEASE 系统安装依赖..."
@@ -61,30 +61,26 @@ install_deps() {
     esac
 }
 
+# --- 下载 Xray ---
 install_xray() {
     echo "下载 Xray 内核..."
     mkdir -p /usr/local/bin /usr/local/etc/xray
-    
     ARCH=$(uname -m)
     case $ARCH in
         x86_64)  DOWNLOAD_ARCH="64" ;;
         aarch64) DOWNLOAD_ARCH="arm64-v8a" ;;
-        *) echo "不支持的架构: $ARCH"; exit 1 ;;
+        *) echo "不支持架构: $ARCH"; exit 1 ;;
     esac
-
     curl -L -o /tmp/xray.zip "https://github.com/XTLS/Xray-core/releases/latest/download/Xray-linux-${DOWNLOAD_ARCH}.zip"
     unzip -qo /tmp/xray.zip -d /usr/local/bin
     chmod +x "$XRAY_BIN"
     rm -f /tmp/xray.zip
 }
 
-# -------------------------
-# 配置生成
-# -------------------------
+# --- 生成配置 ---
 gen_config() {
     UUID="${uuid:-$(cat /proc/sys/kernel/random/uuid)}"
-    
-    # 接收外部传入的端口变量 vlpt
+    # 接收外部传入的端口
     if [[ -n "${vlpt:-}" ]]; then
         PORT="$vlpt"
     else
@@ -121,8 +117,7 @@ gen_config() {
   "outbounds": [{ "protocol": "freedom" }]
 }
 JSON
-
-    # 简单的防火墙放行
+    # 防火墙尝试放行
     if command -v ufw >/dev/null 2>&1; then ufw allow "$PORT"/tcp; fi
     if command -v iptables >/dev/null 2>&1; then iptables -I INPUT -p tcp --dport "$PORT" -j ACCEPT; fi
 
@@ -137,9 +132,7 @@ ENV
     chmod 600 "$ENV_FILE"
 }
 
-# -------------------------
-# 服务管理 (Systemd + OpenRC)
-# -------------------------
+# --- 服务管理 ---
 setup_service() {
     if command -v systemctl >/dev/null 2>&1; then
         cat > /etc/systemd/system/xray.service <<ServiceEOF
@@ -153,9 +146,7 @@ User=root
 [Install]
 WantedBy=multi-user.target
 ServiceEOF
-        systemctl daemon-reload
-        systemctl enable xray >/dev/null 2>&1
-        systemctl restart xray
+        systemctl daemon-reload; systemctl enable xray >/dev/null 2>&1; systemctl restart xray
     elif [ -f /sbin/openrc-run ]; then
         cat > /etc/init.d/xray <<InitEOF
 #!/sbin/openrc-run
@@ -166,18 +157,14 @@ command_background=true
 pidfile="/run/xray.pid"
 InitEOF
         chmod +x /etc/init.d/xray
-        rc-update add xray default
-        rc-service xray restart
+        rc-update add xray default; rc-service xray restart
     else
         $XRAY_BIN run -c $XRAY_CONF &
     fi
 }
 
 cmd_install() {
-    install_deps
-    install_xray
-    gen_config
-    setup_service
+    install_deps; install_xray; gen_config; setup_service
 }
 
 cmd_info() {
@@ -194,7 +181,7 @@ cmd_info() {
         echo "vless://${UUID}@${SERVER_IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=tcp#Node-${PORT}"
         echo -e "----------------------------------------"
     else
-        echo -e "\033[0;31m[错误] 配置文件不存在，请先安装服务。\033[0m"
+        echo -e "\033[0;31m[错误] 配置文件不存在。\033[0m"
     fi
 }
 
@@ -215,12 +202,12 @@ case "$1" in
   *) echo "用法: bash rv.sh install|info|uninstall" ;;
 esac
 EOF
-    # 注意：上面这行 EOF 必须顶格写，前面不能有空格
+    # 下面的 EOF 必须顶格，不要有空格
     chmod +x "$RV_SCRIPT"
 }
 
 # ==================================================
-# 3. 交互询问端口
+# 3. 交互逻辑
 # ==================================================
 ask_port() {
     echo -e "-------------------------------------------"
@@ -244,9 +231,10 @@ ask_port() {
 }
 
 # ==================================================
-# 4. 主菜单入口
+# 4. 菜单入口
 # ==================================================
 install_vless() {
+    # 针对 Alpine 安装 bash
     if [ -f /etc/alpine-release ] && ! command -v bash >/dev/null 2>&1; then
         apk update && apk add bash
     fi
@@ -267,20 +255,18 @@ view_info() {
     if [ -f "$RV_SCRIPT" ]; then
         bash "$RV_SCRIPT" info
     else
-        echo -e "${RED}>>> 尚未安装服务，请先执行安装。${PLAIN}"
+        echo -e "${RED}>>> 尚未安装服务。${PLAIN}"
     fi
-    echo ""
-    read -p "按回车键返回菜单..."
+    echo ""; read -p "按回车键返回菜单..."
     show_menu
 }
 
 uninstall_vless() {
     echo -e "${YELLOW}>>> 正在卸载...${PLAIN}"
     if [ -f "$RV_SCRIPT" ]; then
-        bash "$RV_SCRIPT" uninstall
-        rm -f "$RV_SCRIPT"
+        bash "$RV_SCRIPT" uninstall; rm -f "$RV_SCRIPT"
     else
-        echo "脚本不存在或已卸载。"
+        echo "脚本不存在。"
     fi
 }
 
@@ -304,10 +290,5 @@ show_menu() {
     esac
 }
 
-# 必须 root
-if [ "$(id -u)" -ne 0 ]; then
-    echo -e "${RED}请使用 root 运行！${PLAIN}"
-    exit 1
-fi
-
+if [ "$(id -u)" -ne 0 ]; then echo -e "${RED}请使用 root 运行！${PLAIN}"; exit 1; fi
 show_menu
