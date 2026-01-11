@@ -194,4 +194,120 @@ cmd_info() {
         echo "vless://${UUID}@${SERVER_IP}:${PORT}?encryption=none&flow=xtls-rprx-vision&security=reality&sni=${SNI}&fp=chrome&pbk=${PUBLIC_KEY}&sid=${SHORT_ID}&type=tcp#Node-${PORT}"
         echo -e "----------------------------------------"
     else
-        echo -e "\033[0;31m[错误
+        echo -e "\033[0;31m[错误] 配置文件不存在，请先安装服务。\033[0m"
+    fi
+}
+
+cmd_uninstall() {
+    if command -v systemctl >/dev/null 2>&1; then
+        systemctl stop xray; systemctl disable xray; rm -f /etc/systemd/system/xray.service
+    elif [ -f /sbin/openrc-run ]; then
+        rc-service xray stop; rc-update del xray; rm -f /etc/init.d/xray
+    fi
+    rm -rf /usr/local/bin/xray /usr/local/etc/xray "$ENV_FILE"
+    echo "服务已卸载。"
+}
+
+case "$1" in
+  install) cmd_install ;;
+  info) cmd_info ;;
+  uninstall) cmd_uninstall ;;
+  *) echo "用法: bash rv.sh install|info|uninstall" ;;
+esac
+EOF
+    # 注意：上面这行 EOF 必须顶格写，前面不能有空格
+    chmod +x "$RV_SCRIPT"
+}
+
+# ==================================================
+# 3. 交互询问端口
+# ==================================================
+ask_port() {
+    echo -e "-------------------------------------------"
+    read -p "是否自定义端口? [y/N] (默认随机): " yn
+    if [[ "$yn" =~ ^[Yy]$ ]]; then
+        while true; do
+            read -p "请输入端口 (1-65535): " custom_port
+            if [[ "$custom_port" =~ ^[0-9]+$ ]] && [ "$custom_port" -ge 1 ] && [ "$custom_port" -le 65535 ]; then
+                echo -e "${GREEN}已选择端口: $custom_port${PLAIN}"
+                export vlpt="$custom_port"
+                break
+            else
+                echo -e "${RED}输入无效，请输入 1-65535 之间的数字。${PLAIN}"
+            fi
+        done
+    else
+        echo -e "${GREEN}将使用随机高位端口。${PLAIN}"
+        unset vlpt
+    fi
+    echo -e "-------------------------------------------"
+}
+
+# ==================================================
+# 4. 主菜单入口
+# ==================================================
+install_vless() {
+    if [ -f /etc/alpine-release ] && ! command -v bash >/dev/null 2>&1; then
+        apk update && apk add bash
+    fi
+    
+    echo -e "${GREEN}>>> 初始化环境...${PLAIN}"
+    write_rv_script
+    ask_port
+    
+    echo -e "${GREEN}>>> 开始安装 (适配 Ubuntu/Alpine)...${PLAIN}"
+    bash "$RV_SCRIPT" install
+    
+    echo -e "${GREEN}>>> 安装完成，获取节点信息...${PLAIN}"
+    sleep 2
+    bash "$RV_SCRIPT" info
+}
+
+view_info() {
+    if [ -f "$RV_SCRIPT" ]; then
+        bash "$RV_SCRIPT" info
+    else
+        echo -e "${RED}>>> 尚未安装服务，请先执行安装。${PLAIN}"
+    fi
+    echo ""
+    read -p "按回车键返回菜单..."
+    show_menu
+}
+
+uninstall_vless() {
+    echo -e "${YELLOW}>>> 正在卸载...${PLAIN}"
+    if [ -f "$RV_SCRIPT" ]; then
+        bash "$RV_SCRIPT" uninstall
+        rm -f "$RV_SCRIPT"
+    else
+        echo "脚本不存在或已卸载。"
+    fi
+}
+
+show_menu() {
+    clear
+    echo -e "==========================================="
+    echo -e "   ${GREEN}VLESS Vision (Ubuntu/Debian/Alpine)${PLAIN}"
+    echo -e "==========================================="
+    echo -e "  ${GREEN}1.${PLAIN} 安装 VLESS + TCP + REALITY + Vision"
+    echo -e "  ${GREEN}2.${PLAIN} 卸载 VLESS + TCP + REALITY + Vision"
+    echo -e "  ${GREEN}3.${PLAIN} 显示 VLESS + TCP + REALITY + Vision"
+    echo -e "  ${GREEN}0.${PLAIN} 退出"
+    echo -e "==========================================="
+    read -p " 请输入选项 [0-3]: " num
+    case "$num" in
+        1) install_vless ;;
+        2) uninstall_vless ;;
+        3) view_info ;;
+        0) exit 0 ;;
+        *) echo "无效选项"; sleep 1; show_menu ;;
+    esac
+}
+
+# 必须 root
+if [ "$(id -u)" -ne 0 ]; then
+    echo -e "${RED}请使用 root 运行！${PLAIN}"
+    exit 1
+fi
+
+show_menu
